@@ -54,12 +54,20 @@ The PIN is a `CharArray` of ASCII digits; its bytes are built for each use and z
 the PIN input, the OPRF output, the Argon2id output, the IKM and every leaf are
 [`SecretBytes`](../memory/README.md).
 
-## Not here
+## The routes — `PinRoutes.kt`
 
-The HTTP routes (register, commit, evaluate, confirm, the account PIN's evaluate, begin, enable and
-rotate) and their typed outcomes (`WrongPin`, `RegistrationGone`, `Offline`, `RateLimited`) need
-the API client and are not part of this package yet. No evaluation is ever retried automatically:
-each one is an attempt.
+| Function             | Route                                        | Notes                                                                 |
+| -------------------- | -------------------------------------------- | --------------------------------------------------------------------- |
+| `registerDevicePin`  | `POST /oprf/devices`, then `/commit`         | A fresh 32-byte salt; the commit names the `device-confirm` public key |
+| `evaluateDevicePin`  | `POST /oprf/devices/{id}/evaluate`           | Public. `404` → `DeviceRegistrationGoneException`; a network failure → `OfflineException`, never a wrong PIN |
+| `confirmDevicePin`   | `POST /oprf/devices/{id}/confirm`            | After every successful open: it gives every attempt back               |
+| `deleteDevicePin`    | `DELETE /oprf/devices/{id}`                  |                                                                       |
+| `accountPinProof`    | `POST /oprf/account/evaluate`                | Root-signed `pin-evaluate`; a wrong PIN only shows when the root action it proves fails |
+| `enableParanoid`     | `/oprf/account/begin`, `/enable`             | Root-signed, no proof                                                 |
+| `rotateAccountPin`   | `/evaluate`, `/begin`, `/rotate`             | The proof under the **current** PIN on `begin` and `rotate`           |
+
+**No evaluation is ever retried**: each one is an attempt. The typed unlock outcomes built on these
+are `account`'s `UnlockOutcome`.
 
 ## Tests
 

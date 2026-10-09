@@ -1,0 +1,48 @@
+CREATE TABLE outbox_meta (
+    name TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE outbox_entry (
+    position INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    item_id TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    body TEXT NOT NULL,
+    key_generation INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    attempts INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+);
+
+metaValue:
+SELECT value FROM outbox_meta WHERE name = ?;
+
+setMeta:
+INSERT OR REPLACE INTO outbox_meta (name, value) VALUES (?, ?);
+
+insertEntry:
+INSERT INTO outbox_entry (item_id, scope, method, path, body, key_generation, state, attempts, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?);
+
+lastPosition:
+SELECT last_insert_rowid();
+
+entries:
+SELECT * FROM outbox_entry ORDER BY position;
+
+deleteEntry:
+DELETE FROM outbox_entry WHERE position = ?;
+
+markState:
+UPDATE outbox_entry SET state = ? WHERE position = ?;
+
+countAttempt:
+UPDATE outbox_entry SET attempts = attempts + 1 WHERE position = ?;
+
+replaceBody:
+UPDATE outbox_entry SET body = ?, key_generation = ?, state = ? WHERE position = ?;
+
+clearAll:
+DELETE FROM outbox_entry;

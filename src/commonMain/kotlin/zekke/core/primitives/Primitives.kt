@@ -25,7 +25,7 @@ private val platformPrimitivesInstance: Primitives by lazy {
         hmacSha512 = ProviderHmacSha512(providers),
         pbkdf2HmacSha512 = ProviderPbkdf2HmacSha512(providers),
         hkdf = ProviderHkdf(providers),
-        aesGcm = ProviderAesGcm(providers),
+        aesGcm = platformAesGcm(providers),
         ecdsaP256 = ProviderEcdsaP256(providers),
         x25519 = NativeX25519(native),
         mlKem768 = NativeMlKem768(native),

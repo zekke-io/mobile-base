@@ -1,8 +1,9 @@
 # mobile-base
 
-The Kotlin Multiplatform library both Zekke mobile apps share: the cryptographic basis today, and
-later the protocol, the API client, the local replica and the item domains. Android consumes it as
-a Gradle module, iOS as an XCFramework.
+The Kotlin Multiplatform library both Zekke mobile apps share: the cryptographic basis, the
+protocol, the API client, the local replica and the item domains. It holds no screen: each app
+calls its flows and draws the plaintext view models they return. Android consumes it as a Gradle
+module, iOS as an XCFramework.
 
 Its correctness is defined by the Zekke cross-client test vectors, which it reproduces on every
 target before any code is built on top of them.
@@ -44,6 +45,7 @@ mobile-base/
     jvmMain, androidMain      the JDK provider and Bouncy Castle
     iosMain/…/core            ZekkeNativeCinterop, CryptoKit then CommonCrypto, the platform lock
     nativeInterop/cinterop    zekkeNative.def
+    commonMain/sqldelight     the replica's and the outbox's schemas, one database each
     commonTest/…/core         the tests of every package, run on every target
     jvmTest/…/core            tests that need threads
     commonTest/fixtures       test-vectors.json, a copy of the canonical vector file; RFC 9497's vectors
@@ -62,10 +64,32 @@ Packages are `zekke.core.<module>`, each with its own `README.md`:
 | [`signing`](src/commonMain/kotlin/zekke/core/signing/README.md)       | Challenge and action signatures, and the action table                  |
 | [`oprf`](src/commonMain/kotlin/zekke/core/oprf/README.md)             | The RFC 9497 OPRF client and the keys both PINs derive                 |
 | [`pin`](src/commonMain/kotlin/zekke/core/pin/README.md)               | The PIN format rules                                                   |
+| [`scopes`](src/commonMain/kotlin/zekke/core/scopes/README.md)         | The seven scopes and their canonical lists                             |
+| [`chain`](src/commonMain/kotlin/zekke/core/chain/README.md)           | The account event chain: statements, the verifier, proof paths         |
+| [`keyrings`](src/commonMain/kotlin/zekke/core/keyrings/README.md)     | Scope KEKs, their wraps, and the batch builders                        |
+| [`device`](src/commonMain/kotlin/zekke/core/device/README.md)         | This phone's keys, its sealed record, and the `DeviceVault` each app implements |
+| [`session`](src/commonMain/kotlin/zekke/core/session/README.md)       | The keys of an unlocked phone, its state, the lock and the idle timer  |
+| [`api`](src/commonMain/kotlin/zekke/core/api/README.md)               | The HTTP layer: requests, errors, the token, pagination, the client identity |
+| [`auth`](src/commonMain/kotlin/zekke/core/auth/README.md)             | Signing up, signing in, entering with the phrase                       |
+| [`users`](src/commonMain/kotlin/zekke/core/users/README.md)           | The account, usernames, contacts' keys, account deletion               |
+| [`clients`](src/commonMain/kotlin/zekke/core/clients/README.md)       | Which app versions are still served                                    |
+| [`account`](src/commonMain/kotlin/zekke/core/account/README.md)       | Every account flow, with typed outcomes                                |
+| [`feed`](src/commonMain/kotlin/zekke/core/feed/README.md)             | The SQLite replica of ciphertext, the change feed, and the outbox      |
+| [`items`](src/commonMain/kotlin/zekke/core/items/README.md)           | What every item domain shares: the per-item DEK, signed deletes, the outbox re-wrap |
+| [`secrets`](src/commonMain/kotlin/zekke/core/secrets/README.md)       | The vault: secrets, Recently deleted, restore and purge, the vault view |
+| [`notes`](src/commonMain/kotlin/zekke/core/notes/README.md)           | Notes: the note format, the character rule, editing, the note tiles    |
+| [`credentials`](src/commonMain/kotlin/zekke/core/credentials/README.md) | Passwords: append-only revisions, Recently deleted, the passwords view |
+| [`folders`](src/commonMain/kotlin/zekke/core/folders/README.md)       | The sealed manifest of the vault's tabs and the notes' spaces; the drive's folder tree |
+| [`files`](src/commonMain/kotlin/zekke/core/files/README.md)           | The drive: the format, upload with resume, streaming download, thumbnails, the drive view |
+| [`trash`](src/commonMain/kotlin/zekke/core/trash/README.md)           | The drive's Trash: listing, restoring, purging                         |
+| [`sharing`](src/commonMain/kotlin/zekke/core/sharing/README.md)       | Connections between accounts, shares, trust, the address book, a friendship's folders |
+| [`pairing`](src/commonMain/kotlin/zekke/core/pairing/README.md)       | Linking the password extension from the phone with a temporary code    |
+| [`notifications`](src/commonMain/kotlin/zekke/core/notifications/README.md) | Notices about the account                                        |
+| [`rekey`](src/commonMain/kotlin/zekke/core/rekey/README.md)           | Re-wrapping every scope after a rotation, and re-sealing the preferences |
 
 ## Building and testing
 
-This directory is the Gradle root. With a JDK 21, the Android SDK (API 36) and the NDK pinned in
+This directory is the Gradle root. With a JDK 21, the Android SDK (API 37) and the NDK pinned in
 `gradle/libs.versions.toml`:
 
 ```sh
@@ -74,10 +98,28 @@ This directory is the Gradle root. With a JDK 21, the Android SDK (API 36) and t
 ./gradlew connectedAndroidDeviceTest  # the vectors on a connected device or emulator
 ./gradlew iosSimulatorArm64Test       # the vectors on the iOS simulator (macOS)
 ./gradlew checkTestVectorsFixture     # the fixture still equals the canonical vector file
+./gradlew jvmInteropTest              # the flows, the domains, the drive, sharing and re-keying against a running API (ZEKKE_INTEROP_API)
 ```
 
 A Linux machine without the Android toolchain can run all but the last two from
 [`toolchain`](toolchain/README.md).
+
+**The interop suite** (`src/jvmTest/kotlin/zekke/core/interop`) runs only through
+`jvmInteropTest`, never with `jvmTest`. It signs accounts up against the API at
+`ZEKKE_INTEROP_API` (default `http://localhost:8080`), so it **writes to that API's database**: every
+account it creates is deleted at the end of its test, and an interrupted run can leave one behind.
+It waits out the API's rate limits instead of failing on them. The drive cases move their account
+to `premium_1` through the API's billing route (`ZEKKE_INTEROP_BILLING_TOKEN`, the local compose's
+token by default), upload 1 GiB (`ZEKKE_INTEROP_DRIVE_BYTES`) to the store the API presigns for, and
+need that store reachable from the test.
+
+**The cross-client exchanges** (`CrossClientDriveTest`, `CrossClientSharingTest`) run only when
+`ZEKKE_CROSSCLIENT_DIR` and `ZEKKE_CROSSCLIENT_STEP` are set. Each is one half of an exchange with
+the web app through files in that directory: the core's step writes what it made (and the
+recovery phrases of the throwaway accounts), the web app's own code opens it and writes its answer,
+and the core's next step checks that answer and deletes the accounts. `core-cleanup` deletes
+whatever an interrupted exchange left behind. Run it from a container with
+`--network host` when the API listens on the host.
 
 `jvmTest` builds the host library first and hands its path to the tests in the
 `zekke.native.library` system property; on Android the library is loaded by name from the APK.
@@ -129,7 +171,10 @@ replaced, not patched.
 | its JDK provider                    | JVM, Android     | JCA                                                                     |
 | Bouncy Castle `bcprov-jdk18on` 1.86 | JVM, Android     | The P-256 public point from a raw scalar, which JCA cannot compute       |
 | its CryptoKit and Apple providers   | iOS              | CryptoKit first, CommonCrypto for PBKDF2                                 |
-| `kotlinx-serialization-json`        | tests only       | Reading the vector fixture                                               |
+| `kotlinx-serialization-json`        | all              | The device record's encoding, and reading the vector fixtures in tests  |
+| `kotlinx-coroutines`                | all              | The session's state as a `StateFlow` and its idle timer                  |
+| Ktor 3.6.0                          | all              | HTTP: OkHttp on Android and the JVM, Darwin on iOS                       |
+| SQLDelight 2.4.0                    | all              | The replica and the outbox: the Android driver, the native driver on iOS, JDBC SQLite on the JVM |
 
 Every version is in `gradle/libs.versions.toml`. Kotlin warnings are errors.
 
@@ -137,8 +182,11 @@ Every version is in `gradle/libs.versions.toml`. Kotlin warnings are errors.
 
 `src/commonTest/fixtures/test-vectors.json` is a byte-for-byte copy of the canonical Zekke vector
 file, which `checkTestVectorsFixture` expects at `../api-general/docs/crypto/test-vectors.json`.
-The build embeds it as a Kotlin constant
-(`generateTestFixturesSource`, which turns every JSON file of `src/commonTest/fixtures` into a constant) so every target, the emulator and the simulator included, reads the
+`web-drive-object.json` was written by the web app's own `lib/files` from a fixed key, so the drive
+tests check this core against the other client's bytes. The build embeds every fixture as a Kotlin
+string (`generateTestFixturesSource`, which turns each JSON file of `src/commonTest/fixtures` into
+one, split across literals the JVM can hold), so every target, the emulator and the simulator
+included, reads the
 same values without file access. `checkTestVectorsFixture` (part of `check`) fails when the copy
 and the canonical file differ; when that file is not present it says so and passes. When the
 canonical file changes, copy it again: a value that moved is a protocol

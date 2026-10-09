@@ -12,11 +12,11 @@ another implementation.
 
 | Interface           | What it does                                                        | Provider on Android and the JVM                  | Provider on iOS                      |
 | ------------------- | ------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------ |
-| `Sha2`              | SHA-256, SHA-512                                                    | JCA through `cryptography-kotlin`                | CryptoKit through `cryptography-kotlin` |
+| `Sha2`              | SHA-256, SHA-512, and SHA-256 over a stream (`sha256Stream`)        | JCA through `cryptography-kotlin`                | CryptoKit through `cryptography-kotlin` |
 | `HmacSha512`        | HMAC-SHA512 (SLIP-0010)                                             | JCA                                              | CryptoKit                            |
 | `Pbkdf2HmacSha512`  | PBKDF2-HMAC-SHA512 (the BIP39 seed)                                 | JCA                                              | CommonCrypto (CryptoKit has none)    |
 | `Hkdf`              | HKDF-SHA512 and HKDF-SHA256                                         | `cryptography-kotlin` over JCA's HMAC            | CryptoKit                            |
-| `AesGcm`            | AES-256-GCM with a caller-chosen 12-byte IV and a 16-byte tag       | JCA                                              | CryptoKit                            |
+| `AesGcm`            | AES-256-GCM with a caller-chosen 12-byte IV and a 16-byte tag       | JCA directly, a fresh `Cipher` per call          | CryptoKit                            |
 | `EcdsaP256`         | Public point from a raw scalar; sign and verify in IEEE P1363 form  | JCA, plus Bouncy Castle for the public point     | CryptoKit                            |
 | `P256Scalar`        | `isValidPrivateKey`, `addModOrder` (SLIP-0010's retry rules)        | `commonMain`, fixed-width limbs                  | the same code                        |
 | `X25519`            | Public key, shared secret                                           | libsodium                                        | libsodium                            |
@@ -42,6 +42,10 @@ hardest to get identical. How that code is built is in the [module README](../..
 - **`EcdsaP256.verify` accepts high-S signatures.** The genesis chain contains two, and the
   server's verifier accepts them; a low-S-only verifier would reject a valid account. It returns
   `false` for a malformed key or signature instead of throwing.
+- **AES-GCM builds a fresh `Cipher` for every call on the JVM and Android.** The JDK and Conscrypt
+  refuse to encrypt twice with the same key and IV on one `Cipher`, and `cryptography-kotlin` reuses
+  its instances; the drive seals a chunk again, byte for byte, under its derived IV on purpose
+  ([`files`](../files/README.md)). iOS keeps CryptoKit through `cryptography-kotlin`.
 - **`EcdsaP256.sign` hashes once with SHA-256.** Callers pass the message, never a digest.
 - **X25519 takes the 32 HKDF bytes as they are** and clamps inside libsodium.
 - **`Ristretto255.scalarMult` and `scalarMultBase` throw when the result is the identity**, which

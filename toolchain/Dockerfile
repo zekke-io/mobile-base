@@ -1,7 +1,7 @@
 FROM eclipse-temurin:21.0.12_8-jdk-noble
 
 ARG ANDROID_CMDLINE_TOOLS=16111833
-ARG ANDROID_PLATFORM=android-36
+ARG ANDROID_PLATFORM=android-37.0
 ARG ANDROID_BUILD_TOOLS=36.0.0
 ARG ANDROID_NDK=28.2.13676358
 
@@ -18,7 +18,7 @@ RUN mkdir -p ${ANDROID_HOME}/cmdline-tools \
  && unzip -q /tmp/cmdline-tools.zip -d ${ANDROID_HOME}/cmdline-tools \
  && mv ${ANDROID_HOME}/cmdline-tools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest \
  && rm /tmp/cmdline-tools.zip \
- && yes | sdkmanager --licenses > /dev/null \
+ && (yes | sdkmanager --licenses > /dev/null || true) \
  && sdkmanager "platform-tools" "platforms;${ANDROID_PLATFORM}" "build-tools;${ANDROID_BUILD_TOOLS}" "ndk;${ANDROID_NDK}" > /dev/null \
  && chmod -R a+rX ${ANDROID_HOME}
 

@@ -1,0 +1,80 @@
+CREATE TABLE replica_meta (
+    name TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE replica_row (
+    item_type TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    item TEXT NOT NULL,
+    PRIMARY KEY (item_type, item_id)
+);
+
+CREATE INDEX replica_row_by_scope ON replica_row (scope, item_type, seq);
+
+CREATE TABLE replica_tombstone (
+    item_type TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    PRIMARY KEY (item_type, item_id)
+);
+
+CREATE TABLE replica_cursor (
+    scope TEXT NOT NULL PRIMARY KEY,
+    cursor INTEGER NOT NULL,
+    synced INTEGER NOT NULL
+);
+
+metaValue:
+SELECT value FROM replica_meta WHERE name = ?;
+
+setMeta:
+INSERT OR REPLACE INTO replica_meta (name, value) VALUES (?, ?);
+
+rowSeq:
+SELECT seq FROM replica_row WHERE item_type = ? AND item_id = ?;
+
+tombstoneSeq:
+SELECT seq FROM replica_tombstone WHERE item_type = ? AND item_id = ?;
+
+putRow:
+INSERT OR REPLACE INTO replica_row (item_type, item_id, scope, seq, item) VALUES (?, ?, ?, ?, ?);
+
+deleteRow:
+DELETE FROM replica_row WHERE item_type = ? AND item_id = ?;
+
+putTombstone:
+INSERT OR REPLACE INTO replica_tombstone (item_type, item_id, scope, seq) VALUES (?, ?, ?, ?);
+
+cursorOf:
+SELECT cursor, synced FROM replica_cursor WHERE scope = ?;
+
+setCursor:
+INSERT OR REPLACE INTO replica_cursor (scope, cursor, synced) VALUES (?, ?, ?);
+
+itemsOf:
+SELECT item_id, seq, item FROM replica_row WHERE scope = ? AND item_type = ? ORDER BY seq;
+
+countInScope:
+SELECT count(*) FROM replica_row WHERE scope = ?;
+
+clearRows:
+DELETE FROM replica_row WHERE scope = ?;
+
+clearTombstones:
+DELETE FROM replica_tombstone WHERE scope = ?;
+
+clearCursor:
+DELETE FROM replica_cursor WHERE scope = ?;
+
+clearAllRows:
+DELETE FROM replica_row;
+
+clearAllTombstones:
+DELETE FROM replica_tombstone;
+
+clearAllCursors:
+DELETE FROM replica_cursor;

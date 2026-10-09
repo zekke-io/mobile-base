@@ -16,6 +16,8 @@ import dev.whyoleg.cryptography.algorithms.SHA512
 
 internal expect fun platformCryptographyProviders(): List<CryptographyProvider>
 
+internal expect fun platformAesGcm(providers: CryptographyProviders): AesGcm
+
 internal class CryptographyProviders(private val providers: List<CryptographyProvider>) {
     fun <A : CryptographyAlgorithm> algorithm(id: CryptographyAlgorithmId<A>): A =
         providers.firstNotNullOfOrNull { it.getOrNull(id) } ?: throw PrimitiveFailureException("${id.name} lookup")
@@ -25,6 +27,17 @@ internal class ProviderSha2(private val providers: CryptographyProviders) : Sha2
     override fun sha256(data: ByteArray): ByteArray = providers.algorithm(SHA256).hasher().hashBlocking(data)
 
     override fun sha512(data: ByteArray): ByteArray = providers.algorithm(SHA512).hasher().hashBlocking(data)
+
+    override fun sha256Stream(): StreamingHash {
+        val function = providers.algorithm(SHA256).hasher().createHashFunction()
+        return object : StreamingHash {
+            override fun update(data: ByteArray, offset: Int, length: Int) = function.update(data, offset, offset + length)
+
+            override fun finish(): ByteArray = function.hashToByteArray()
+
+            override fun close() = function.close()
+        }
+    }
 }
 
 internal class ProviderHmacSha512(private val providers: CryptographyProviders) : HmacSha512 {

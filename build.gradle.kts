@@ -5,6 +5,8 @@ import org.jetbrains.kotlin.konan.target.HostManager
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.sqldelight)
     alias(libs.plugins.android.kotlin.multiplatform.library)
 }
 
@@ -27,7 +29,8 @@ abstract class GenerateTestFixturesSource : DefaultTask() {
             val json = fixture.readText()
             check(!json.contains("\"\"\"")) { "${fixture.name} cannot be embedded in a raw string" }
             val name = fixture.nameWithoutExtension.uppercase().replace(Regex("[^A-Z0-9]"), "_") + "_JSON"
-            "internal const val $name = \"\"\"" + json.replace("$", "\${'$'}") + "\"\"\"\n"
+            val parts = json.chunked(20_000).joinToString(",\n") { "\"\"\"" + it.replace("$", "\${'$'}") + "\"\"\"" }
+            "internal val $name: String = listOf(\n$parts,\n).joinToString(\"\")\n"
         }
         val source = outputDirectory.get().file("zekke/core/fixtures/TestFixtures.kt").asFile
         outputDirectory.get().asFile.deleteRecursively()
@@ -158,25 +161,36 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.cryptography.core)
+            implementation(libs.kotlinx.serialization.json)
+            api(libs.kotlinx.coroutines.core)
+            implementation(libs.ktor.client.core)
+            implementation(libs.sqldelight.runtime)
         }
         commonTest {
             kotlin.srcDir(generateTestFixturesSource)
             dependencies {
                 implementation(kotlin("test"))
-                implementation(libs.kotlinx.serialization.json)
+                implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.ktor.client.mock)
             }
         }
         jvmMain.dependencies {
             implementation(libs.cryptography.provider.jdk)
             implementation(libs.bouncycastle.provider)
+            implementation(libs.ktor.client.okhttp)
+            implementation(libs.sqldelight.sqlite.driver)
         }
         androidMain.dependencies {
             implementation(libs.cryptography.provider.jdk)
             implementation(libs.bouncycastle.provider)
+            implementation(libs.ktor.client.okhttp)
+            implementation(libs.sqldelight.android.driver)
         }
         iosMain.dependencies {
             implementation(libs.cryptography.provider.apple)
             implementation(libs.cryptography.provider.cryptokit)
+            implementation(libs.ktor.client.darwin)
+            implementation(libs.sqldelight.native.driver)
         }
         getByName("androidDeviceTest").dependencies {
             implementation(libs.androidx.test.runner)
@@ -197,6 +211,25 @@ androidComponents {
 
 tasks.named<Test>("jvmTest") {
     dependsOn(buildJvmNativeLibrary)
+    filter { excludeTestsMatching("zekke.core.interop.*") }
+    val libraryFile = nativeBuildDirectory.map { it.file("jvm/" + System.mapLibraryName("zekke_native")).asFile.absolutePath }
+    doFirst { systemProperty("zekke.native.library", libraryFile.get()) }
+}
+
+val jvmInteropTest = tasks.register<Test>("jvmInteropTest") {
+    group = "verification"
+    description = "Runs the interop suite against a running Zekke API (ZEKKE_INTEROP_API, default http://localhost:8080)."
+    val jvmTest = tasks.named<Test>("jvmTest")
+    testClassesDirs = files(jvmTest.map { it.testClassesDirs })
+    classpath = files(jvmTest.map { it.classpath })
+    dependsOn(buildJvmNativeLibrary, "jvmTestClasses")
+    useJUnit()
+    filter { includeTestsMatching("zekke.core.interop.*") }
+    systemProperty("zekke.interop.api", providers.environmentVariable("ZEKKE_INTEROP_API").getOrElse("http://localhost:8080"))
+    systemProperty("zekke.crossclient.dir", providers.environmentVariable("ZEKKE_CROSSCLIENT_DIR").getOrElse(""))
+    systemProperty("zekke.crossclient.step", providers.environmentVariable("ZEKKE_CROSSCLIENT_STEP").getOrElse(""))
+    providers.environmentVariable("ZEKKE_INTEROP_DRIVE_BYTES").orNull?.let { systemProperty("zekke.interop.driveBytes", it) }
+    outputs.upToDateWhen { false }
     val libraryFile = nativeBuildDirectory.map { it.file("jvm/" + System.mapLibraryName("zekke_native")).asFile.absolutePath }
     doFirst { systemProperty("zekke.native.library", libraryFile.get()) }
 }
@@ -207,4 +240,17 @@ tasks.named("check") {
 
 tasks.matching { it.name.startsWith("cinteropZekkeNative") }.configureEach {
     dependsOn(buildIosNativeLibraries)
+}
+
+sqldelight {
+    databases {
+        create("ReplicaDatabase") {
+            packageName.set("zekke.core.feed.db")
+            srcDirs("src/commonMain/sqldelight/replica")
+        }
+        create("OutboxDatabase") {
+            packageName.set("zekke.core.feed.outboxdb")
+            srcDirs("src/commonMain/sqldelight/outbox")
+        }
+    }
 }
