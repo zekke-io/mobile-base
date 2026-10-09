@@ -1,0 +1,3 @@
+headers = zekke_native.h
+package = zekke.core.primitives.cinterop
+staticLibraries = libzekke_native.a
