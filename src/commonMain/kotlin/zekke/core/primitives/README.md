@@ -1,9 +1,8 @@
 # `zekke.core.primitives`
 
-Layer 1 of the Kotlin core ([kotlin.md § Layer 1](../../../../../../../mobile/kotlin.md#layer-1--primitives)):
-every cryptographic primitive the protocol uses, each behind one interface, so a provider can be
+The first layer of `mobile-base`: every cryptographic primitive the protocol uses, each behind one interface, so a provider can be
 replaced without touching the protocol. **Nothing here is hand-rolled** except the 256-bit addition
-modulo P-256's order, which the plan places in `commonMain` on purpose.
+modulo P-256's order, which lives in `commonMain` so both platforms run the same code.
 
 `platformPrimitives()` returns the one `Primitives` instance the platform provides. Everything above
 this package receives a `Primitives` rather than reaching for a provider, so a test can hand in
@@ -54,15 +53,6 @@ hardest to get identical. How that code is built is in the [module README](../..
 - **Failures inside a provider throw `PrimitiveFailureException`**, naming the operation and
   nothing else: no key, no input, no length.
 
-## What is not here yet
-
-- `SecretBytes` and zeroing in `finally` belong to the layers that hold keys (K1 onwards); the C
-  surface already wipes every secret buffer it allocates.
-- Wycheproof vectors (AES-GCM, ECDSA P-256, X25519, Ed25519) are planned in
-  [kotlin.md § Testing](../../../../../../../mobile/kotlin.md#testing) and not yet added.
-- RFC 9497's own vectors belong to `oprf` (K2). K0 checks the ristretto255 group itself against
-  RFC 9496.
-
 ## Tests
 
 `src/commonTest/kotlin/zekke/core/primitives`, run on every target. Each test names the vector it
@@ -84,5 +74,5 @@ reproduces:
 | CSPRNG         | Sizes; two draws differ                                                                               |
 
 The vectors come from `src/commonTest/fixtures/test-vectors.json`, a byte-for-byte copy of
-`api-general/docs/crypto/test-vectors.json`. The RFC 9496 values were extracted from the RFC's
+the canonical Zekke vector file (see the [module README](../../../../../../README.md#the-vector-fixture)). The RFC 9496 values were extracted from the RFC's
 text by script, not typed.

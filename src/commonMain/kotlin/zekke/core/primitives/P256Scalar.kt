@@ -17,6 +17,16 @@ object P256Scalar {
         return !isZero(words) && isBelowOrder(words)
     }
 
+    fun isBelowOrder(scalar: ByteArray): Boolean {
+        require(scalar.size == BYTES) { "a P-256 scalar is $BYTES bytes" }
+        return isBelowOrder(toWords(scalar))
+    }
+
+    fun isZero(scalar: ByteArray): Boolean {
+        require(scalar.size == BYTES) { "a P-256 scalar is $BYTES bytes" }
+        return isZero(toWords(scalar))
+    }
+
     fun addModOrder(left: ByteArray, right: ByteArray): ByteArray {
         require(left.size == BYTES && right.size == BYTES) { "a P-256 scalar is $BYTES bytes" }
         val leftWords = toWords(left)

@@ -1,0 +1,139 @@
+package zekke.core.pqxdh
+
+import zekke.core.encoding.base64ToBytes
+import zekke.core.encoding.bytesToBase64
+import zekke.core.encoding.concatBytes
+import zekke.core.encoding.utf8ToBytes
+import zekke.core.encoding.zeroBytes
+import zekke.core.primitives.AesGcm
+import zekke.core.primitives.MlKem768
+import zekke.core.primitives.Primitives
+import zekke.core.primitives.X25519
+import zekke.core.primitives.platformPrimitives
+
+const val PQXDH_VERSION: Byte = 0x01
+const val KEM_CIPHERTEXT_LENGTH = MlKem768.CIPHERTEXT_BYTES
+const val EPHEMERAL_PUBLIC_LENGTH = X25519.KEY_BYTES
+const val IV_LENGTH = AesGcm.IV_BYTES
+const val GCM_TAG_LENGTH = AesGcm.TAG_BYTES
+const val SESSION_KEY_LENGTH = 32
+
+const val PQXDH_INFO_PREFIX = "Cryple-PQXDH-v1|"
+
+private const val IKM_PREFIX_BYTE: Byte = 0xff.toByte()
+private const val IKM_PREFIX_LENGTH = 32
+private const val HKDF_SALT_LENGTH = 32
+
+private const val HEADER_LENGTH = 1 + KEM_CIPHERTEXT_LENGTH + EPHEMERAL_PUBLIC_LENGTH + IV_LENGTH
+private const val MIN_BLOB_LENGTH = HEADER_LENGTH + GCM_TAG_LENGTH
+
+enum class PqxdhUsage(val label: String) {
+    ITEM_SHARE("item-share"),
+    DEVICE_KEYRING("device-keyring"),
+}
+
+class UnsupportedPqxdhVersionException(val version: Byte) :
+    IllegalArgumentException("unsupported PQXDH version byte 0x${(version.toInt() and 0xff).toString(16).padStart(2, '0')}")
+
+class MalformedPqxdhBlobException(message: String) : IllegalArgumentException("malformed PQXDH blob: $message")
+
+class PqxdhAuthenticationException : IllegalStateException("PQXDH blob did not authenticate under these keys and context")
+
+class RecipientKeys(val x25519PublicKey: ByteArray, val mlkemPublicKey: ByteArray)
+
+fun interface X25519Agreement {
+    fun deriveSharedSecret(peerPublicKey: ByteArray): ByteArray
+}
+
+fun rawX25519Agreement(privateKey: ByteArray, primitives: Primitives = platformPrimitives()): X25519Agreement =
+    X25519Agreement { peerPublicKey -> primitives.x25519.sharedSecret(privateKey, peerPublicKey) }
+
+class RecipientSecrets(val x25519: X25519Agreement, val mlkemSecretKey: ByteArray)
+
+class PqxdhContext(val usage: PqxdhUsage, val senderUserAddress: String, val recipientUserAddress: String)
+
+class ParsedBlob(
+    val version: Byte,
+    val kemCiphertext: ByteArray,
+    val ephemeralPublicKey: ByteArray,
+    val iv: ByteArray,
+    val sealed: ByteArray,
+)
+
+fun deviceRecipientSlot(userAddress: String, deviceId: String): String = "$userAddress/$deviceId"
+
+fun buildInfo(context: PqxdhContext): String =
+    PQXDH_INFO_PREFIX + "${context.usage.label}|${context.senderUserAddress}|${context.recipientUserAddress}"
+
+fun deriveSessionKey(
+    ecdhSecret: ByteArray,
+    kemSecret: ByteArray,
+    context: PqxdhContext,
+    primitives: Primitives = platformPrimitives(),
+): ByteArray {
+    val ikm = concatBytes(ByteArray(IKM_PREFIX_LENGTH) { IKM_PREFIX_BYTE }, ecdhSecret, kemSecret)
+    try {
+        return primitives.hkdf.sha256(ikm, ByteArray(HKDF_SALT_LENGTH), utf8ToBytes(buildInfo(context)), SESSION_KEY_LENGTH)
+    } finally {
+        zeroBytes(ikm)
+    }
+}
+
+fun parseBlob(blobBase64: String): ParsedBlob {
+    val blob = base64ToBytes(blobBase64)
+    if (blob.size < MIN_BLOB_LENGTH) {
+        throw MalformedPqxdhBlobException("${blob.size} bytes, shorter than the $MIN_BLOB_LENGTH-byte minimum")
+    }
+    if (blob[0] != PQXDH_VERSION) throw UnsupportedPqxdhVersionException(blob[0])
+    var offset = 1
+    fun take(length: Int): ByteArray = blob.copyOfRange(offset, offset + length).also { offset += length }
+    val kemCiphertext = take(KEM_CIPHERTEXT_LENGTH)
+    val ephemeralPublicKey = take(EPHEMERAL_PUBLIC_LENGTH)
+    val iv = take(IV_LENGTH)
+    val sealed = blob.copyOfRange(offset, blob.size)
+    return ParsedBlob(blob[0], kemCiphertext, ephemeralPublicKey, iv, sealed)
+}
+
+fun pqxdhWrap(
+    payload: ByteArray,
+    recipient: RecipientKeys,
+    context: PqxdhContext,
+    primitives: Primitives = platformPrimitives(),
+): String {
+    val ephemeralPrivateKey = primitives.secureRandom.nextBytes(X25519.KEY_BYTES)
+    var ecdhSecret: ByteArray? = null
+    var kemSecret: ByteArray? = null
+    var sessionKey: ByteArray? = null
+    try {
+        val ephemeralPublicKey = primitives.x25519.publicKey(ephemeralPrivateKey)
+        ecdhSecret = primitives.x25519.sharedSecret(ephemeralPrivateKey, recipient.x25519PublicKey)
+        val encapsulation = primitives.mlKem768.encapsulate(recipient.mlkemPublicKey)
+        kemSecret = encapsulation.sharedSecret
+        sessionKey = deriveSessionKey(ecdhSecret, kemSecret, context, primitives)
+        val iv = primitives.secureRandom.nextBytes(IV_LENGTH)
+        val sealed = primitives.aesGcm.encrypt(sessionKey, iv, payload)
+        return bytesToBase64(concatBytes(byteArrayOf(PQXDH_VERSION), encapsulation.ciphertext, ephemeralPublicKey, iv, sealed))
+    } finally {
+        zeroBytes(ephemeralPrivateKey, ecdhSecret, kemSecret, sessionKey)
+    }
+}
+
+fun pqxdhUnwrap(
+    blobBase64: String,
+    secrets: RecipientSecrets,
+    context: PqxdhContext,
+    primitives: Primitives = platformPrimitives(),
+): ByteArray {
+    val blob = parseBlob(blobBase64)
+    var ecdhSecret: ByteArray? = null
+    var kemSecret: ByteArray? = null
+    var sessionKey: ByteArray? = null
+    try {
+        ecdhSecret = secrets.x25519.deriveSharedSecret(blob.ephemeralPublicKey)
+        kemSecret = primitives.mlKem768.decapsulate(secrets.mlkemSecretKey, blob.kemCiphertext)
+        sessionKey = deriveSessionKey(ecdhSecret, kemSecret, context, primitives)
+        return primitives.aesGcm.decrypt(sessionKey, blob.iv, blob.sealed) ?: throw PqxdhAuthenticationException()
+    } finally {
+        zeroBytes(ecdhSecret, kemSecret, sessionKey)
+    }
+}

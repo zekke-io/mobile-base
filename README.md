@@ -1,30 +1,22 @@
 # mobile-base
 
-The Kotlin Multiplatform core both Zekke mobile apps share: the cryptographic basis, and in later
-milestones the protocol, the API client, the replica and the item domains. **The plan, its rules
-and its milestones are in [mobile/kotlin.md](../mobile/kotlin.md)**; this README describes what is built and how
-to build it. Android consumes it as a Gradle module, iOS as an XCFramework.
+The Kotlin Multiplatform library both Zekke mobile apps share: the cryptographic basis today, and
+later the protocol, the API client, the local replica and the item domains. Android consumes it as
+a Gradle module, iOS as an XCFramework.
 
-It is the second implementation of the Zekke client protocol, after the web app's TypeScript. The
-two never share code. They are bound by `api-general/docs/crypto/test-vectors.json`, which this
-module reproduces, and later by interop tests against a live API.
+Its correctness is defined by the Zekke cross-client test vectors, which it reproduces on every
+target before any code is built on top of them.
 
-## Where it stands
+## Targets
 
-**Milestone K0: the Gradle project, the targets, CI, the two C libraries built from pinned
-sources, and the primitives' interfaces.** K0 is done when every row of the primitives table passes
-its vectors on all four targets.
+| Target                          | Native code                                         | Platform crypto              |
+| ------------------------------- | --------------------------------------------------- | ---------------------------- |
+| JVM                             | `libzekke_native.so` / `.dylib` for the host, JNI   | JCA and Bouncy Castle        |
+| Android (minSdk 28)             | `libzekke_native.so` for `arm64-v8a`, `armeabi-v7a`, `x86_64`, JNI | JCA and Bouncy Castle |
+| `iosArm64`, `iosSimulatorArm64` | `libzekke_native.a` per target, cinterop            | CryptoKit, then CommonCrypto |
 
-| Target                          | Built | Vectors pass |
-| ------------------------------- | ----- | ------------ |
-| JVM (Linux x86_64)              | yes   | yes, 41 tests |
-| Android 14, x86_64 emulator     | yes   | yes, the same 41 tests |
-| Android, arm64 phone            | yes (`arm64-v8a`, `armeabi-v7a` too) | not yet run: needs a phone |
-| iOS simulator, iOS arm64        | written, never compiled | not yet run: needs macOS |
-
-The iOS source set (`ZekkeNativeCinterop`, the `cinterop` definition, `native/build-ios.sh`) has
-not been compiled: Kotlin/Native cannot process a `cinterop` for Apple targets on a Linux host.
-Until the `ios` CI job has run green on macOS, treat that code as unverified.
+The JVM target exists for fast tests and interop tests; it ships in no product. The iOS targets
+build only on macOS: Kotlin/Native cannot process an Apple cinterop on another host.
 
 ## Layout
 
@@ -47,18 +39,25 @@ mobile-base/
     src/zekke_native.c        that surface, over libsodium and mlkem-native
     src/zekke_native_jni.c    the JNI shim over it, for Android and the JVM
   src/
-    commonMain/…/primitives   the interfaces, the cryptography-kotlin implementations, P256Scalar
+    commonMain/…/core         one directory per package, below
     jniMain/…/primitives      ZekkeNativeJni, shared by the JVM and Android
     jvmMain, androidMain      the JDK provider and Bouncy Castle
     iosMain/…/primitives      ZekkeNativeCinterop, CryptoKit then CommonCrypto
     nativeInterop/cinterop    zekkeNative.def
-    commonTest/…/primitives   the vector tests, run on every target
-    commonTest/fixtures       test-vectors.json, a copy of api-general's
+    commonTest/…/core         the tests of every package, run on every target
+    commonTest/fixtures       test-vectors.json, a copy of the canonical vector file
 ```
 
-Packages are `zekke.core.<module>`, one per web-app module they port, each with its own
-`README.md`. Only [`zekke.core.primitives`](src/commonMain/kotlin/zekke/core/primitives/README.md)
-exists so far.
+Packages are `zekke.core.<module>`, each with its own `README.md`:
+
+| Package                                                        | What it holds                                                         |
+| -------------------------------------------------------------- | --------------------------------------------------------------------- |
+| [`primitives`](src/commonMain/kotlin/zekke/core/primitives/README.md) | Every cryptographic primitive behind one interface                     |
+| [`encoding`](src/commonMain/kotlin/zekke/core/encoding/README.md)     | Hex, base64, UTF-8 and the P-256 public key encodings                  |
+| [`keys`](src/commonMain/kotlin/zekke/core/keys/README.md)             | BIP39, SLIP-0010 and the frozen key tree                               |
+| [`sealed`](src/commonMain/kotlin/zekke/core/sealed/README.md)         | The AES-256-GCM sealed-blob envelope                                   |
+| [`pqxdh`](src/commonMain/kotlin/zekke/core/pqxdh/README.md)           | Hybrid X25519 + ML-KEM-768 wrapping for a recipient                    |
+| [`signing`](src/commonMain/kotlin/zekke/core/signing/README.md)       | Challenge and action signatures, and the action table                  |
 
 ## Building and testing
 
@@ -70,7 +69,7 @@ This directory is the Gradle root. With a JDK 21, the Android SDK (API 36) and t
 ./gradlew assemble                    # the AAR, with the native code for every ABI
 ./gradlew connectedAndroidDeviceTest  # the vectors on a connected device or emulator
 ./gradlew iosSimulatorArm64Test       # the vectors on the iOS simulator (macOS)
-./gradlew checkTestVectorsFixture     # the fixture still equals api-general's
+./gradlew checkTestVectorsFixture     # the fixture still equals the canonical vector file
 ```
 
 A Linux machine without the Android toolchain can run all but the last two from
@@ -81,8 +80,11 @@ A Linux machine without the Android toolchain can run all but the last two from
 
 ## The native libraries
 
-Two C libraries are built from source rather than taken as wrappers, for the reasons in
-[kotlin.md § Layer 1](../mobile/kotlin.md#layer-1--primitives):
+Two C libraries are built from source rather than taken as Kotlin wrappers. The available
+libsodium wrappers are experimental and do not clearly expose ristretto255, and the platform ML-KEM
+APIs cannot generate a key pair from a seed on both platforms. Building the same C code for every
+target gives Android and iOS one implementation of the primitives that are hardest to get
+identical:
 
 | Library      | Version | Used for                                                     |
 | ------------ | ------- | ------------------------------------------------------------ |
@@ -129,10 +131,11 @@ Every version is in `gradle/libs.versions.toml`. Kotlin warnings are errors.
 
 ## The vector fixture
 
-`src/commonTest/fixtures/test-vectors.json` is a byte-for-byte copy of
-`api-general/docs/crypto/test-vectors.json`. The build embeds it as a Kotlin constant
+`src/commonTest/fixtures/test-vectors.json` is a byte-for-byte copy of the canonical Zekke vector
+file, which `checkTestVectorsFixture` expects at `../api-general/docs/crypto/test-vectors.json`.
+The build embeds it as a Kotlin constant
 (`generateTestVectorsSource`) so every target, the emulator and the simulator included, reads the
 same values without file access. `checkTestVectorsFixture` (part of `check`) fails when the copy
-and api-general's file differ; when api-general is not checked out next to `mobile-base/` it says so
-and passes. When api-general changes the file, copy it again: a value that moved is a protocol
+and the canonical file differ; when that file is not present it says so and passes. When the
+canonical file changes, copy it again: a value that moved is a protocol
 change, and the tests say which.
