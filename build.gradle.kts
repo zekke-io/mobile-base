@@ -13,24 +13,26 @@ abstract class NativeLibraryBuild : Exec() {
     abstract val outputDirectory: DirectoryProperty
 }
 
-abstract class GenerateTestVectorsSource : DefaultTask() {
-    @get:InputFile
-    @get:PathSensitive(PathSensitivity.NONE)
-    abstract val fixture: RegularFileProperty
+abstract class GenerateTestFixturesSource : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val fixtures: DirectoryProperty
 
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
 
     @TaskAction
     fun generate() {
-        val json = fixture.get().asFile.readText()
-        check(!json.contains("\"\"\"")) { "the fixture cannot be embedded in a raw string" }
-        val source = outputDirectory.get().file("zekke/core/fixtures/TestVectorsJson.kt").asFile
+        val constants = fixtures.get().asFile.listFiles { file -> file.extension == "json" }!!.sortedBy { it.name }.map { fixture ->
+            val json = fixture.readText()
+            check(!json.contains("\"\"\"")) { "${fixture.name} cannot be embedded in a raw string" }
+            val name = fixture.nameWithoutExtension.uppercase().replace(Regex("[^A-Z0-9]"), "_") + "_JSON"
+            "internal const val $name = \"\"\"" + json.replace("$", "\${'$'}") + "\"\"\"\n"
+        }
+        val source = outputDirectory.get().file("zekke/core/fixtures/TestFixtures.kt").asFile
+        outputDirectory.get().asFile.deleteRecursively()
         source.parentFile.mkdirs()
-        source.writeText(
-            "package zekke.core.fixtures\n\ninternal const val TEST_VECTORS_JSON = \"\"\"" +
-                json.replace("$", "\${'$'}") + "\"\"\"\n",
-        )
+        source.writeText("package zekke.core.fixtures\n\n" + constants.joinToString("\n"))
     }
 }
 
@@ -76,9 +78,9 @@ fun NativeLibraryBuild.configureScript(script: String, outputSubdirectory: Strin
 
 val testVectorsFixture = layout.projectDirectory.file("src/commonTest/fixtures/test-vectors.json")
 
-val generateTestVectorsSource = tasks.register<GenerateTestVectorsSource>("generateTestVectorsSource") {
-    fixture.set(testVectorsFixture)
-    outputDirectory.set(layout.buildDirectory.dir("generated/testVectors/kotlin"))
+val generateTestFixturesSource = tasks.register<GenerateTestFixturesSource>("generateTestFixturesSource") {
+    fixtures.set(layout.projectDirectory.dir("src/commonTest/fixtures"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/testFixtures/kotlin"))
 }
 
 val checkTestVectorsFixture = tasks.register<CheckTestVectorsFixture>("checkTestVectorsFixture") {
@@ -118,7 +120,7 @@ kotlin {
 
     jvm()
 
-    androidLibrary {
+    android {
         namespace = "zekke.core"
         compileSdk = libs.versions.android.compile.sdk.get().toInt()
         minSdk = libs.versions.android.min.sdk.get().toInt()
@@ -158,7 +160,7 @@ kotlin {
             implementation(libs.cryptography.core)
         }
         commonTest {
-            kotlin.srcDir(generateTestVectorsSource)
+            kotlin.srcDir(generateTestFixturesSource)
             dependencies {
                 implementation(kotlin("test"))
                 implementation(libs.kotlinx.serialization.json)

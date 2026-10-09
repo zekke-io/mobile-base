@@ -74,11 +74,11 @@ fun normalizeActionArgs(action: Action, args: List<String>): List<String> {
     }
     if (action.variadic) {
         if (args.isEmpty()) throw InvalidActionArgumentsException(action, "needs at least one ${action.args[0]}")
-        val distinct = args.toSortedSet()
+        val distinct = args.toSet().sorted()
         if (action.refusesRepeatedIds && distinct.size != args.size) {
             throw InvalidActionArgumentsException(action, "a re-key batch names each id once")
         }
-        return distinct.toList()
+        return distinct
     }
     if (args.size != action.args.size) {
         throw InvalidActionArgumentsException(

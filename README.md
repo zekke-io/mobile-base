@@ -45,7 +45,7 @@ mobile-base/
     iosMain/…/primitives      ZekkeNativeCinterop, CryptoKit then CommonCrypto
     nativeInterop/cinterop    zekkeNative.def
     commonTest/…/core         the tests of every package, run on every target
-    commonTest/fixtures       test-vectors.json, a copy of the canonical vector file
+    commonTest/fixtures       test-vectors.json, a copy of the canonical vector file; RFC 9497's vectors
 ```
 
 Packages are `zekke.core.<module>`, each with its own `README.md`:
@@ -58,6 +58,8 @@ Packages are `zekke.core.<module>`, each with its own `README.md`:
 | [`sealed`](src/commonMain/kotlin/zekke/core/sealed/README.md)         | The AES-256-GCM sealed-blob envelope                                   |
 | [`pqxdh`](src/commonMain/kotlin/zekke/core/pqxdh/README.md)           | Hybrid X25519 + ML-KEM-768 wrapping for a recipient                    |
 | [`signing`](src/commonMain/kotlin/zekke/core/signing/README.md)       | Challenge and action signatures, and the action table                  |
+| [`oprf`](src/commonMain/kotlin/zekke/core/oprf/README.md)             | The RFC 9497 OPRF client and the keys both PINs derive                 |
+| [`pin`](src/commonMain/kotlin/zekke/core/pin/README.md)               | The PIN format rules                                                   |
 
 ## Building and testing
 
@@ -134,7 +136,7 @@ Every version is in `gradle/libs.versions.toml`. Kotlin warnings are errors.
 `src/commonTest/fixtures/test-vectors.json` is a byte-for-byte copy of the canonical Zekke vector
 file, which `checkTestVectorsFixture` expects at `../api-general/docs/crypto/test-vectors.json`.
 The build embeds it as a Kotlin constant
-(`generateTestVectorsSource`) so every target, the emulator and the simulator included, reads the
+(`generateTestFixturesSource`, which turns every JSON file of `src/commonTest/fixtures` into a constant) so every target, the emulator and the simulator included, reads the
 same values without file access. `checkTestVectorsFixture` (part of `check`) fails when the copy
 and the canonical file differ; when that file is not present it says so and passes. When the
 canonical file changes, copy it again: a value that moved is a protocol
