@@ -40,11 +40,12 @@ mobile-base/
     src/zekke_native_jni.c    the JNI shim over it, for Android and the JVM
   src/
     commonMain/…/core         one directory per package, below
-    jniMain/…/primitives      ZekkeNativeJni, shared by the JVM and Android
+    jniMain/…/core            ZekkeNativeJni and the platform lock, shared by the JVM and Android
     jvmMain, androidMain      the JDK provider and Bouncy Castle
-    iosMain/…/primitives      ZekkeNativeCinterop, CryptoKit then CommonCrypto
+    iosMain/…/core            ZekkeNativeCinterop, CryptoKit then CommonCrypto, the platform lock
     nativeInterop/cinterop    zekkeNative.def
     commonTest/…/core         the tests of every package, run on every target
+    jvmTest/…/core            tests that need threads
     commonTest/fixtures       test-vectors.json, a copy of the canonical vector file; RFC 9497's vectors
 ```
 
@@ -53,6 +54,7 @@ Packages are `zekke.core.<module>`, each with its own `README.md`:
 | Package                                                        | What it holds                                                         |
 | -------------------------------------------------------------- | --------------------------------------------------------------------- |
 | [`primitives`](src/commonMain/kotlin/zekke/core/primitives/README.md) | Every cryptographic primitive behind one interface                     |
+| [`memory`](src/commonMain/kotlin/zekke/core/memory/README.md)         | `SecretBytes` and the registry a lock zeroes                           |
 | [`encoding`](src/commonMain/kotlin/zekke/core/encoding/README.md)     | Hex, base64, UTF-8 and the P-256 public key encodings                  |
 | [`keys`](src/commonMain/kotlin/zekke/core/keys/README.md)             | BIP39, SLIP-0010 and the frozen key tree                               |
 | [`sealed`](src/commonMain/kotlin/zekke/core/sealed/README.md)         | The AES-256-GCM sealed-blob envelope                                   |

@@ -26,8 +26,8 @@ Base64 on the wire: a 32-byte DEK wraps to 1576 characters.
 
 | Function / type                          | Purpose                                                                    |
 | ---------------------------------------- | -------------------------------------------------------------------------- |
-| `pqxdhWrap(payload, recipient, context)` | → base64 blob                                                               |
-| `pqxdhUnwrap(blob, secrets, context)`    | → payload                                                                   |
+| `pqxdhWrap(payload, recipient, context)` | → base64 blob. The payload is always a key, so it is a `SecretBytes`        |
+| `pqxdhUnwrap(blob, secrets, context)`    | → the payload, as a `SecretBytes`                                           |
 | `PqxdhContext(usage, sender, recipient)` | Addresses are the 64-character lowercase hex strings, joined literally      |
 | `PqxdhUsage`                             | `ITEM_SHARE` (`item-share`) and `DEVICE_KEYRING` (`device-keyring`) only    |
 | `RecipientSecrets(x25519, mlkemSecretKey)` | `x25519` is an `X25519Agreement`, so a device whose key is held elsewhere never hands it over; `rawX25519Agreement` wraps a key held in memory |

@@ -1,5 +1,7 @@
 package zekke.core.pqxdh
 
+import zekke.core.primitives.toHex
+import zekke.core.memory.adoptAsSecret
 import zekke.core.encoding.base64ToBytes
 import zekke.core.encoding.bytesToBase64
 import zekke.core.encoding.bytesToHex
@@ -14,12 +16,12 @@ import kotlin.test.assertNotEquals
 class PqxdhTest {
     private val userAddress = TestVectors.string("seed_and_user_address", "user_address")
     private val context = PqxdhContext(PqxdhUsage.ITEM_SHARE, userAddress, userAddress)
-    private val ecdhSecret = TestVectors.hex("pqxdh", "intermediate", "ecdh_secret_hex")
-    private val kemSecret = TestVectors.hex("pqxdh", "intermediate", "kem_secret_hex")
+    private val ecdhSecret = TestVectors.secret("pqxdh", "intermediate", "ecdh_secret_hex")
+    private val kemSecret = TestVectors.secret("pqxdh", "intermediate", "kem_secret_hex")
     private val wireBlob = TestVectors.string("pqxdh", "aead_wrap_example", "wire_blob_base64")
-    private val recipientX25519Private = TestVectors.hex("x25519_key", "private_key_or_seed_hex")
+    private val recipientX25519Private = TestVectors.secret("x25519_key", "private_key_or_seed_hex")
     private val recipientMlKem = primitives.mlKem768.keyPairFromSeed(TestVectors.hex("mlkem768_key", "private_key_or_seed_hex"))
-    private val secrets = RecipientSecrets(rawX25519Agreement(recipientX25519Private, primitives), recipientMlKem.secretKey)
+    private val secrets = RecipientSecrets(rawX25519Agreement(recipientX25519Private, primitives), recipientMlKem.secretKey.copyOf().adoptAsSecret())
     private val recipient = RecipientKeys(TestVectors.hex("x25519_key", "public_key_hex"), recipientMlKem.publicKey)
 
     @Test
@@ -31,7 +33,7 @@ class PqxdhTest {
     fun reproducesTheSessionKey() {
         assertEquals(
             TestVectors.string("pqxdh", "output", "session_key_hex"),
-            bytesToHex(deriveSessionKey(ecdhSecret, kemSecret, context, primitives)),
+            deriveSessionKey(ecdhSecret, kemSecret, context, primitives).toHex(),
         )
     }
 
@@ -39,7 +41,7 @@ class PqxdhTest {
     fun unwrapsTheRecordedWireBlob() {
         assertEquals(
             TestVectors.string("pqxdh", "aead_wrap_example", "plaintext_dek_hex"),
-            bytesToHex(pqxdhUnwrap(wireBlob, secrets, context, primitives)),
+            pqxdhUnwrap(wireBlob, secrets, context, primitives).toHex(),
         )
     }
 
@@ -63,12 +65,12 @@ class PqxdhTest {
             deriveSessionKey(ecdhSecret, kemSecret, PqxdhContext(PqxdhUsage.ITEM_SHARE, userAddress, other), primitives),
             deriveSessionKey(kemSecret, ecdhSecret, context, primitives),
         )
-        for (variant in variants) assertNotEquals(expected, bytesToHex(variant))
+        for (variant in variants) assertNotEquals(expected, variant.toHex())
     }
 
     @Test
     fun wrapsAndUnwrapsForEveryUsageWithAFreshEphemeralAndIv() {
-        val payload = TestVectors.hex("pqxdh", "aead_wrap_example", "plaintext_dek_hex")
+        val payload = TestVectors.secret("pqxdh", "aead_wrap_example", "plaintext_dek_hex")
         for (usage in PqxdhUsage.entries) {
             val usageContext = PqxdhContext(usage, userAddress, userAddress)
             val first = pqxdhWrap(payload, recipient, usageContext, primitives)
@@ -76,7 +78,7 @@ class PqxdhTest {
             assertEquals(1576, first.length)
             assertNotEquals(bytesToHex(parseBlob(first).ephemeralPublicKey), bytesToHex(parseBlob(second).ephemeralPublicKey))
             assertNotEquals(bytesToHex(parseBlob(first).iv), bytesToHex(parseBlob(second).iv))
-            assertContentEquals(payload, pqxdhUnwrap(first, secrets, usageContext, primitives))
+            assertEquals(payload.toHex(), pqxdhUnwrap(first, secrets, usageContext, primitives).toHex())
         }
     }
 

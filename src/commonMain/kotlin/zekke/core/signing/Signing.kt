@@ -4,6 +4,7 @@ import zekke.core.encoding.base64ToBytes
 import zekke.core.encoding.bytesToBase64
 import zekke.core.encoding.bytesToHex
 import zekke.core.encoding.utf8ToBytes
+import zekke.core.memory.SecretBytes
 import zekke.core.primitives.EcdsaP256
 import zekke.core.primitives.Primitives
 import zekke.core.primitives.platformPrimitives
@@ -32,8 +33,8 @@ class WrongSignerException(action: Action) :
 
 class PinProofNotAllowedException(action: Action) : IllegalArgumentException("${action.label} never carries a PIN proof")
 
-fun rawKeySigner(privateKey: ByteArray, primitives: Primitives = platformPrimitives()): Signer =
-    Signer { message -> primitives.ecdsaP256.sign(privateKey, message) }
+fun rawKeySigner(privateKey: SecretBytes, primitives: Primitives = platformPrimitives()): Signer =
+    Signer { message -> privateKey.withBytes { primitives.ecdsaP256.sign(it, message) } }
 
 fun createChallenge(primitives: Primitives = platformPrimitives()): String =
     bytesToHex(primitives.secureRandom.nextBytes(CHALLENGE_BYTES))

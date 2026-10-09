@@ -13,6 +13,10 @@ sealed(key, plaintext) = 0x01 ‖ iv(12) ‖ AES-256-GCM(key, iv, plaintext) ‖
 | `sealBytes` / `openBytes`   | The envelope as raw bytes (drive chunks)                    |
 | `sealBlob` / `openBlob`     | The same, base64, for text columns                          |
 | `sealText` / `openText`     | UTF-8 on top of the base64 form; intermediate bytes zeroed  |
+| `sealSecretBlob` / `openSecretBlob` | The base64 form when the plaintext is itself a key (a DEK, a KEK): it goes in and comes out as a `SecretBytes` |
+
+The sealing key is always a [`SecretBytes`](../memory/README.md); sealing or opening with a zeroed
+one throws `SecretZeroedException`, so a locked session can never seal under a zero key.
 
 **A fresh random IV on every seal.** `sealBytesWithIv` takes a caller-chosen IV and is `internal`:
 only the drive's derived chunk IVs and the tests may use it.

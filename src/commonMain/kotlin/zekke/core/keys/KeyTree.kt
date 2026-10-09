@@ -4,7 +4,9 @@ import zekke.core.encoding.bytesToBase64
 import zekke.core.encoding.bytesToHex
 import zekke.core.encoding.uncompressedPointToSpkiBase64
 import zekke.core.encoding.utf8ToBytes
-import zekke.core.encoding.zeroBytes
+import zekke.core.memory.SecretBytes
+import zekke.core.memory.adoptAsSecret
+import zekke.core.memory.zeroSecrets
 import zekke.core.primitives.Primitives
 import zekke.core.primitives.platformPrimitives
 
@@ -22,36 +24,36 @@ private const val VAULT_KEK_LENGTH = 32
 private val EMPTY_SALT = ByteArray(0)
 
 class IdentityKey(
-    val privateKey: ByteArray,
-    val chainCode: ByteArray,
+    val privateKey: SecretBytes,
+    val chainCode: SecretBytes,
     val publicKeyUncompressed: ByteArray,
     val publicKeySpkiBase64: String,
 )
 
-class X25519Key(val privateKey: ByteArray, val publicKey: ByteArray, val publicKeyBase64: String)
+class X25519Key(val privateKey: SecretBytes, val publicKey: ByteArray, val publicKeyBase64: String)
 
-class MlKem768Key(val seed: ByteArray, val secretKey: ByteArray, val publicKey: ByteArray, val publicKeyBase64: String)
+class MlKem768Key(val seed: SecretBytes, val secretKey: SecretBytes, val publicKey: ByteArray, val publicKeyBase64: String)
 
 class ZekkeKeyTree(
-    val seed: ByteArray,
+    val seed: SecretBytes,
     val userAddress: String,
     val identity: IdentityKey,
     val x25519: X25519Key,
     val mlkem768: MlKem768Key,
-    val vaultKek: ByteArray,
+    val vaultKek: SecretBytes,
 )
 
-class RootKeys(val userAddress: String, val signing: IdentityKey, val wrapKey: ByteArray)
+class RootKeys(val userAddress: String, val signing: IdentityKey, val wrapKey: SecretBytes)
 
-private fun hkdfSha512(primitives: Primitives, inputKeyMaterial: ByteArray, info: String, length: Int): ByteArray =
-    primitives.hkdf.sha512(inputKeyMaterial, EMPTY_SALT, utf8ToBytes(info), length)
+private fun hkdfSha512(primitives: Primitives, seed: SecretBytes, info: String, length: Int): SecretBytes =
+    seed.withBytes { primitives.hkdf.sha512(it, EMPTY_SALT, utf8ToBytes(info), length) }.adoptAsSecret()
 
-fun deriveUserAddress(seed: ByteArray, primitives: Primitives = platformPrimitives()): String =
-    bytesToHex(primitives.sha2.sha256(seed))
+fun deriveUserAddress(seed: SecretBytes, primitives: Primitives = platformPrimitives()): String =
+    bytesToHex(seed.withBytes { primitives.sha2.sha256(it) })
 
-fun deriveIdentityKey(seed: ByteArray, primitives: Primitives = platformPrimitives()): IdentityKey {
+fun deriveIdentityKey(seed: SecretBytes, primitives: Primitives = platformPrimitives()): IdentityKey {
     val node = deriveHardenedPath(seed, IDENTITY_PATH, primitives)
-    val publicKeyUncompressed = primitives.ecdsaP256.publicKey(node.privateKey)
+    val publicKeyUncompressed = node.privateKey.withBytes { primitives.ecdsaP256.publicKey(it) }
     return IdentityKey(
         privateKey = node.privateKey,
         chainCode = node.chainCode,
@@ -60,27 +62,27 @@ fun deriveIdentityKey(seed: ByteArray, primitives: Primitives = platformPrimitiv
     )
 }
 
-fun deriveX25519Key(seed: ByteArray, primitives: Primitives = platformPrimitives()): X25519Key {
+fun deriveX25519Key(seed: SecretBytes, primitives: Primitives = platformPrimitives()): X25519Key {
     val privateKey = hkdfSha512(primitives, seed, X25519_HKDF_INFO, X25519_KEY_LENGTH)
-    val publicKey = primitives.x25519.publicKey(privateKey)
+    val publicKey = privateKey.withBytes { primitives.x25519.publicKey(it) }
     return X25519Key(privateKey = privateKey, publicKey = publicKey, publicKeyBase64 = bytesToBase64(publicKey))
 }
 
-fun deriveMlKem768Key(seed: ByteArray, primitives: Primitives = platformPrimitives()): MlKem768Key {
+fun deriveMlKem768Key(seed: SecretBytes, primitives: Primitives = platformPrimitives()): MlKem768Key {
     val kemSeed = hkdfSha512(primitives, seed, MLKEM768_HKDF_INFO, MLKEM768_SEED_LENGTH)
-    val keyPair = primitives.mlKem768.keyPairFromSeed(kemSeed)
+    val keyPair = kemSeed.withBytes { primitives.mlKem768.keyPairFromSeed(it) }
     return MlKem768Key(
         seed = kemSeed,
-        secretKey = keyPair.secretKey,
+        secretKey = keyPair.secretKey.adoptAsSecret(),
         publicKey = keyPair.publicKey,
         publicKeyBase64 = bytesToBase64(keyPair.publicKey),
     )
 }
 
-fun deriveVaultKek(seed: ByteArray, primitives: Primitives = platformPrimitives()): ByteArray =
+fun deriveVaultKek(seed: SecretBytes, primitives: Primitives = platformPrimitives()): SecretBytes =
     hkdfSha512(primitives, seed, VAULT_KEK_HKDF_INFO, VAULT_KEK_LENGTH)
 
-fun deriveKeyTreeFromSeed(seed: ByteArray, primitives: Primitives = platformPrimitives()): ZekkeKeyTree =
+fun deriveKeyTreeFromSeed(seed: SecretBytes, primitives: Primitives = platformPrimitives()): ZekkeKeyTree =
     ZekkeKeyTree(
         seed = seed,
         userAddress = deriveUserAddress(seed, primitives),
@@ -93,28 +95,22 @@ fun deriveKeyTreeFromSeed(seed: ByteArray, primitives: Primitives = platformPrim
 fun deriveKeyTree(words: List<CharArray>, primitives: Primitives = platformPrimitives()): ZekkeKeyTree =
     deriveKeyTreeFromSeed(mnemonicToSeed(words, primitives), primitives)
 
-fun deriveRootKeys(seed: ByteArray, primitives: Primitives = platformPrimitives()): RootKeys =
+fun deriveRootKeys(seed: SecretBytes, primitives: Primitives = platformPrimitives()): RootKeys =
     RootKeys(
         userAddress = deriveUserAddress(seed, primitives),
         signing = deriveIdentityKey(seed, primitives),
         wrapKey = deriveVaultKek(seed, primitives),
     )
 
-fun deriveRootKeysFromMnemonic(words: List<CharArray>, primitives: Primitives = platformPrimitives()): RootKeys {
-    val seed = mnemonicToSeed(words, primitives)
-    try {
-        return deriveRootKeys(seed, primitives)
-    } finally {
-        zeroBytes(seed)
-    }
-}
+fun deriveRootKeysFromMnemonic(words: List<CharArray>, primitives: Primitives = platformPrimitives()): RootKeys =
+    mnemonicToSeed(words, primitives).use { seed -> deriveRootKeys(seed, primitives) }
 
 fun zeroRootKeys(root: RootKeys) {
-    zeroBytes(root.signing.privateKey, root.signing.chainCode, root.wrapKey)
+    zeroSecrets(root.signing.privateKey, root.signing.chainCode, root.wrapKey)
 }
 
 fun zeroKeyTree(tree: ZekkeKeyTree) {
-    zeroBytes(
+    zeroSecrets(
         tree.seed,
         tree.identity.privateKey,
         tree.identity.chainCode,

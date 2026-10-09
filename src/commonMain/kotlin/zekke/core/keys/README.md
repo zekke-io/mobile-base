@@ -35,7 +35,9 @@ X25519 and ML-KEM leaves stay derived so the vectors keep checking them.
 | `isValidMnemonic`, `assertValidMnemonic`, `mnemonicToSeed`, `generateMnemonic`   | BIP39                                                        |
 | `deriveMasterNode`, `deriveHardenedChild`, `deriveHardenedPath`                  | SLIP-0010                                                    |
 
-Every function takes a `Primitives`, defaulting to `platformPrimitives()`.
+Every function takes a `Primitives`, defaulting to `platformPrimitives()`. Every private value
+(the seed, private keys, chain codes, the ML-KEM seed and secret key, the vault KEK) is a
+[`SecretBytes`](../memory/README.md), so a lock zeroes it; public keys and the address are not.
 
 ## The phrase is never a `String`
 
@@ -47,6 +49,8 @@ copy of a word is made. The PBKDF2 password is built as bytes and zeroed after t
   Normalising what a person typed is the app's job.
 - **No passphrase.** Zekke never sets one, so the salt is always `"mnemonic"`; NFKD normalisation,
   which a passphrase would need and Kotlin's common library lacks, is never required.
+- **The seed is a `SecretBytes`** from `mnemonicToSeed` on; the PBKDF2 password bytes are zeroed
+  as soon as it is derived.
 - **The wordlist ships inside the library** (`Bip39EnglishWordlist.kt`); a test checks its SHA-256
   against the canonical list's, `2f5eed53…24dbda`.
 

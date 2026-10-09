@@ -1,5 +1,7 @@
 package zekke.core.primitives
 
+import zekke.core.memory.adoptAsSecret
+import zekke.core.memory.SecretBytes
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -23,11 +25,15 @@ internal object TestVectors {
     fun hex(vararg path: Any): ByteArray = string(*path).hexToBytes()
 
     fun base64(vararg path: Any): ByteArray = Base64.decode(string(*path))
+
+    fun secret(vararg path: Any): SecretBytes = hex(*path).adoptAsSecret()
 }
 
 internal fun String.hexToBytes(): ByteArray = hexToByteArray()
 
 internal fun ByteArray.toHex(): String = toHexString()
+
+internal fun SecretBytes.toHex(): String = withBytes { it.toHexString() }
 
 internal fun String.utf8(): ByteArray = encodeToByteArray()
 

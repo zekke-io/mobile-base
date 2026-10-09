@@ -1,5 +1,6 @@
 package zekke.core.signing
 
+import zekke.core.memory.adoptAsSecret
 import zekke.core.encoding.base64ToBytes
 import zekke.core.encoding.bytesToBase64
 import zekke.core.encoding.bytesToHex
@@ -50,7 +51,7 @@ class SigningTest {
     @Test
     fun signsInP1363AndVerifiesAgainstTheRightKeyOnly() {
         val payload = buildAuthPayload(createChallenge(primitives), fixedClock())
-        val signature = signPayload(payload, rawKeySigner(rootPrivate, primitives))
+        val signature = signPayload(payload, rawKeySigner(rootPrivate.copyOf().adoptAsSecret(), primitives))
         assertEquals(64, base64ToBytes(signature).size)
         assertTrue(verifyPayload(payload, signature, rootPublic, primitives))
         assertFalse(verifyPayload(payload, signature, primitives.ecdsaP256.publicKey(devicePrivate), primitives))
@@ -77,7 +78,7 @@ class SigningTest {
     @Test
     fun anAuthSignatureNeverVerifiesAsAnAction() {
         val challenge = createChallenge(primitives)
-        val auth = signPayload(buildAuthPayload(challenge, 1L), rawKeySigner(rootPrivate, primitives))
+        val auth = signPayload(buildAuthPayload(challenge, 1L), rawKeySigner(rootPrivate.copyOf().adoptAsSecret(), primitives))
         val action = buildActionPayload(challenge, 1L, Action.CHAIN_READ, listOf(userAddress))
         assertFalse(verifyPayload(action, auth, rootPublic, primitives))
     }
@@ -106,14 +107,14 @@ class SigningTest {
 
     @Test
     fun aDeviceActionAndARootActionRefuseTheOtherSigner() {
-        val signer = rawKeySigner(devicePrivate, primitives)
+        val signer = rawKeySigner(devicePrivate.copyOf().adoptAsSecret(), primitives)
         assertFailsWith<WrongSignerException> { signActionEnvelope(Action.ACCOUNT_DELETE, listOf(userAddress), signer, primitives) }
         assertFailsWith<WrongSignerException> { signRootAction(Action.SECRET_DELETE, listOf("id"), signer, primitives = primitives) }
     }
 
     @Test
     fun aDeviceEnvelopeVerifiesOverItsRebuiltPayload() {
-        val envelope = signActionEnvelope(Action.NOTE_DELETE, listOf("b", "a"), rawKeySigner(devicePrivate, primitives), primitives, fixedClock)
+        val envelope = signActionEnvelope(Action.NOTE_DELETE, listOf("b", "a"), rawKeySigner(devicePrivate.copyOf().adoptAsSecret(), primitives), primitives, fixedClock)
         val payload = buildActionPayload(envelope.challenge, envelope.timestamp, Action.NOTE_DELETE, listOf("a", "b"))
         assertEquals(1767225600L, envelope.timestamp)
         assertTrue(verifyPayload(payload, envelope.signature, primitives.ecdsaP256.publicKey(devicePrivate), primitives))
@@ -125,7 +126,7 @@ class SigningTest {
         val envelope = signRootAction(
             Action.ACCOUNT_DELETE,
             listOf(userAddress),
-            rawKeySigner(rootPrivate, primitives),
+            rawKeySigner(rootPrivate.copyOf().adoptAsSecret(), primitives),
             PinProofSigner { digest -> primitives.ed25519.sign(proofSeed, digest) },
             primitives,
             fixedClock,
@@ -140,8 +141,8 @@ class SigningTest {
     fun aPinProofIsRefusedWhereItNeverApplies() {
         val proof = PinProofSigner { ByteArray(64) }
         assertFailsWith<PinProofNotAllowedException> {
-            signRootAction(Action.ENABLE_SECOND_FACTOR, listOf("key"), rawKeySigner(rootPrivate, primitives), proof, primitives)
+            signRootAction(Action.ENABLE_SECOND_FACTOR, listOf("key"), rawKeySigner(rootPrivate.copyOf().adoptAsSecret(), primitives), proof, primitives)
         }
-        assertNull(signRootAction(Action.CHAIN_READ, listOf(userAddress), rawKeySigner(rootPrivate, primitives), primitives = primitives).pinProof)
+        assertNull(signRootAction(Action.CHAIN_READ, listOf(userAddress), rawKeySigner(rootPrivate.copyOf().adoptAsSecret(), primitives), primitives = primitives).pinProof)
     }
 }

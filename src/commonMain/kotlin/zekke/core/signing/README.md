@@ -22,7 +22,7 @@ lowercase hex; the timestamp is the device clock in Unix **seconds**.
 | Function / type                                        | Purpose                                                                                 |
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------- |
 | `Signer`                                               | `signBytes(message)` → 64-byte IEEE P1363. Hashes once with SHA-256                       |
-| `rawKeySigner(privateKey)`                             | The root, derived from the phrase for one flow                                           |
+| `rawKeySigner(privateKey)`                             | The root, derived from the phrase for one flow. The key is a `SecretBytes`: once a lock zeroes it, signing throws |
 | `createChallenge()`, `currentTimestamp()`              |                                                                                         |
 | `buildAuthPayload`, `buildActionPayload`, `payloadDigest` | The strings above, and their SHA-256                                                  |
 | `signPayload`, `verifyPayload`                         | `verifyPayload` accepts high-S signatures and returns `false` for malformed input         |

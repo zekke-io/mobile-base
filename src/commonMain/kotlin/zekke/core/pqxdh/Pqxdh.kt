@@ -5,6 +5,9 @@ import zekke.core.encoding.bytesToBase64
 import zekke.core.encoding.concatBytes
 import zekke.core.encoding.utf8ToBytes
 import zekke.core.encoding.zeroBytes
+import zekke.core.memory.SecretBytes
+import zekke.core.memory.adoptAsSecret
+import zekke.core.memory.zeroSecrets
 import zekke.core.primitives.AesGcm
 import zekke.core.primitives.MlKem768
 import zekke.core.primitives.Primitives
@@ -42,13 +45,13 @@ class PqxdhAuthenticationException : IllegalStateException("PQXDH blob did not a
 class RecipientKeys(val x25519PublicKey: ByteArray, val mlkemPublicKey: ByteArray)
 
 fun interface X25519Agreement {
-    fun deriveSharedSecret(peerPublicKey: ByteArray): ByteArray
+    fun deriveSharedSecret(peerPublicKey: ByteArray): SecretBytes
 }
 
-fun rawX25519Agreement(privateKey: ByteArray, primitives: Primitives = platformPrimitives()): X25519Agreement =
-    X25519Agreement { peerPublicKey -> primitives.x25519.sharedSecret(privateKey, peerPublicKey) }
+fun rawX25519Agreement(privateKey: SecretBytes, primitives: Primitives = platformPrimitives()): X25519Agreement =
+    X25519Agreement { peerPublicKey -> privateKey.withBytes { primitives.x25519.sharedSecret(it, peerPublicKey) }.adoptAsSecret() }
 
-class RecipientSecrets(val x25519: X25519Agreement, val mlkemSecretKey: ByteArray)
+class RecipientSecrets(val x25519: X25519Agreement, val mlkemSecretKey: SecretBytes)
 
 class PqxdhContext(val usage: PqxdhUsage, val senderUserAddress: String, val recipientUserAddress: String)
 
@@ -66,14 +69,17 @@ fun buildInfo(context: PqxdhContext): String =
     PQXDH_INFO_PREFIX + "${context.usage.label}|${context.senderUserAddress}|${context.recipientUserAddress}"
 
 fun deriveSessionKey(
-    ecdhSecret: ByteArray,
-    kemSecret: ByteArray,
+    ecdhSecret: SecretBytes,
+    kemSecret: SecretBytes,
     context: PqxdhContext,
     primitives: Primitives = platformPrimitives(),
-): ByteArray {
-    val ikm = concatBytes(ByteArray(IKM_PREFIX_LENGTH) { IKM_PREFIX_BYTE }, ecdhSecret, kemSecret)
+): SecretBytes {
+    val ikm = ecdhSecret.withBytes { ecdh ->
+        kemSecret.withBytes { kem -> concatBytes(ByteArray(IKM_PREFIX_LENGTH) { IKM_PREFIX_BYTE }, ecdh, kem) }
+    }
     try {
         return primitives.hkdf.sha256(ikm, ByteArray(HKDF_SALT_LENGTH), utf8ToBytes(buildInfo(context)), SESSION_KEY_LENGTH)
+            .adoptAsSecret()
     } finally {
         zeroBytes(ikm)
     }
@@ -95,26 +101,26 @@ fun parseBlob(blobBase64: String): ParsedBlob {
 }
 
 fun pqxdhWrap(
-    payload: ByteArray,
+    payload: SecretBytes,
     recipient: RecipientKeys,
     context: PqxdhContext,
     primitives: Primitives = platformPrimitives(),
 ): String {
-    val ephemeralPrivateKey = primitives.secureRandom.nextBytes(X25519.KEY_BYTES)
-    var ecdhSecret: ByteArray? = null
-    var kemSecret: ByteArray? = null
-    var sessionKey: ByteArray? = null
+    val ephemeralPrivateKey = primitives.secureRandom.nextBytes(X25519.KEY_BYTES).adoptAsSecret()
+    var ecdhSecret: SecretBytes? = null
+    var kemSecret: SecretBytes? = null
+    var sessionKey: SecretBytes? = null
     try {
-        val ephemeralPublicKey = primitives.x25519.publicKey(ephemeralPrivateKey)
-        ecdhSecret = primitives.x25519.sharedSecret(ephemeralPrivateKey, recipient.x25519PublicKey)
+        val ephemeralPublicKey = ephemeralPrivateKey.withBytes { primitives.x25519.publicKey(it) }
+        ecdhSecret = ephemeralPrivateKey.withBytes { primitives.x25519.sharedSecret(it, recipient.x25519PublicKey) }.adoptAsSecret()
         val encapsulation = primitives.mlKem768.encapsulate(recipient.mlkemPublicKey)
-        kemSecret = encapsulation.sharedSecret
+        kemSecret = encapsulation.sharedSecret.adoptAsSecret()
         sessionKey = deriveSessionKey(ecdhSecret, kemSecret, context, primitives)
         val iv = primitives.secureRandom.nextBytes(IV_LENGTH)
-        val sealed = primitives.aesGcm.encrypt(sessionKey, iv, payload)
+        val sealed = sessionKey.withBytes { key -> payload.withBytes { primitives.aesGcm.encrypt(key, iv, it) } }
         return bytesToBase64(concatBytes(byteArrayOf(PQXDH_VERSION), encapsulation.ciphertext, ephemeralPublicKey, iv, sealed))
     } finally {
-        zeroBytes(ephemeralPrivateKey, ecdhSecret, kemSecret, sessionKey)
+        zeroSecrets(ephemeralPrivateKey, ecdhSecret, kemSecret, sessionKey)
     }
 }
 
@@ -123,17 +129,18 @@ fun pqxdhUnwrap(
     secrets: RecipientSecrets,
     context: PqxdhContext,
     primitives: Primitives = platformPrimitives(),
-): ByteArray {
+): SecretBytes {
     val blob = parseBlob(blobBase64)
-    var ecdhSecret: ByteArray? = null
-    var kemSecret: ByteArray? = null
-    var sessionKey: ByteArray? = null
+    var ecdhSecret: SecretBytes? = null
+    var kemSecret: SecretBytes? = null
+    var sessionKey: SecretBytes? = null
     try {
         ecdhSecret = secrets.x25519.deriveSharedSecret(blob.ephemeralPublicKey)
-        kemSecret = primitives.mlKem768.decapsulate(secrets.mlkemSecretKey, blob.kemCiphertext)
+        kemSecret = secrets.mlkemSecretKey.withBytes { primitives.mlKem768.decapsulate(it, blob.kemCiphertext) }.adoptAsSecret()
         sessionKey = deriveSessionKey(ecdhSecret, kemSecret, context, primitives)
-        return primitives.aesGcm.decrypt(sessionKey, blob.iv, blob.sealed) ?: throw PqxdhAuthenticationException()
+        val payload = sessionKey.withBytes { primitives.aesGcm.decrypt(it, blob.iv, blob.sealed) } ?: throw PqxdhAuthenticationException()
+        return payload.adoptAsSecret()
     } finally {
-        zeroBytes(ecdhSecret, kemSecret, sessionKey)
+        zeroSecrets(ecdhSecret, kemSecret, sessionKey)
     }
 }

@@ -5,6 +5,9 @@ import zekke.core.encoding.bytesToBase64
 import zekke.core.encoding.concatBytes
 import zekke.core.encoding.utf8ToBytes
 import zekke.core.encoding.zeroBytes
+import zekke.core.memory.SecretBytes
+import zekke.core.memory.adoptAsSecret
+import zekke.core.memory.zeroSecrets
 import zekke.core.primitives.PrimitiveFailureException
 import zekke.core.primitives.Primitives
 import zekke.core.primitives.Ristretto255
@@ -25,7 +28,7 @@ private const val FINALIZE_LABEL = "Finalize"
 class MalformedElementException :
     IllegalArgumentException("the server returned an element that is not a valid ristretto255 encoding")
 
-class BlindedPin internal constructor(val input: ByteArray, val blind: ByteArray, val blindedElement: String)
+class BlindedPin internal constructor(val input: SecretBytes, val blind: SecretBytes, val blindedElement: String)
 
 fun expandMessageXmd(message: ByteArray, dst: ByteArray, length: Int, primitives: Primitives = platformPrimitives()): ByteArray {
     val blocks = (length + SHA512_BYTES - 1) / SHA512_BYTES
@@ -69,28 +72,19 @@ fun hashToScalar(input: ByteArray, dst: ByteArray = utf8ToBytes(OPRF_HASH_TO_SCA
     }
 }
 
-fun blindPin(pin: CharArray, primitives: Primitives = platformPrimitives()): BlindedPin {
-    val blind = primitives.ristretto255.randomScalar()
-    try {
-        return blindInputWithScalar(pinInput(pin), blind, primitives)
-    } finally {
-        zeroBytes(blind)
-    }
+fun blindPin(pin: CharArray, primitives: Primitives = platformPrimitives()): BlindedPin =
+    primitives.ristretto255.randomScalar().adoptAsSecret().use { blind -> blindPinWithScalar(pin, blind, primitives) }
+
+fun blindPinWithScalar(pin: CharArray, blind: SecretBytes, primitives: Primitives = platformPrimitives()): BlindedPin =
+    pinInput(pin).use { input -> blindInputWithScalar(input, blind, primitives) }
+
+fun blindInputWithScalar(input: SecretBytes, blind: SecretBytes, primitives: Primitives = platformPrimitives()): BlindedPin {
+    val element = input.withBytes { hashToGroup(it, primitives) }
+    val blindedElement = blind.withBytes { primitives.ristretto255.scalarMult(it, element) }
+    return BlindedPin(input = input.copy(), blind = blind.copy(), blindedElement = bytesToBase64(blindedElement))
 }
 
-fun blindPinWithScalar(pin: CharArray, blind: ByteArray, primitives: Primitives = platformPrimitives()): BlindedPin =
-    blindInputWithScalar(pinInput(pin), blind, primitives)
-
-fun blindInputWithScalar(input: ByteArray, blind: ByteArray, primitives: Primitives = platformPrimitives()): BlindedPin {
-    val element = hashToGroup(input, primitives)
-    return BlindedPin(
-        input = input.copyOf(),
-        blind = blind.copyOf(),
-        blindedElement = bytesToBase64(primitives.ristretto255.scalarMult(blind, element)),
-    )
-}
-
-fun finalizePin(blinded: BlindedPin, evaluatedElement: String, primitives: Primitives = platformPrimitives()): ByteArray {
+fun finalizePin(blinded: BlindedPin, evaluatedElement: String, primitives: Primitives = platformPrimitives()): SecretBytes {
     try {
         val evaluated = try {
             base64ToBytes(evaluatedElement)
@@ -98,34 +92,32 @@ fun finalizePin(blinded: BlindedPin, evaluatedElement: String, primitives: Primi
             throw MalformedElementException()
         }
         if (evaluated.size != ELEMENT_BYTES || !primitives.ristretto255.isValidPoint(evaluated)) throw MalformedElementException()
-        val inverse = primitives.ristretto255.invertScalar(blinded.blind)
-        val unblinded = try {
-            primitives.ristretto255.scalarMult(inverse, evaluated)
-        } catch (_: PrimitiveFailureException) {
-            throw MalformedElementException()
-        } finally {
-            zeroBytes(inverse)
+        val unblinded = blinded.blind.withBytes { blind ->
+            val inverse = primitives.ristretto255.invertScalar(blind)
+            try {
+                primitives.ristretto255.scalarMult(inverse, evaluated)
+            } catch (_: PrimitiveFailureException) {
+                throw MalformedElementException()
+            } finally {
+                zeroBytes(inverse)
+            }
         }
-        val hashInput = concatBytes(
-            i2osp(blinded.input.size, 2),
-            blinded.input,
-            i2osp(unblinded.size, 2),
-            unblinded,
-            utf8ToBytes(FINALIZE_LABEL),
-        )
+        val hashInput = blinded.input.withBytes { input ->
+            concatBytes(i2osp(input.size, 2), input, i2osp(unblinded.size, 2), unblinded, utf8ToBytes(FINALIZE_LABEL))
+        }
         try {
-            return primitives.sha2.sha512(hashInput)
+            return primitives.sha2.sha512(hashInput).adoptAsSecret()
         } finally {
             zeroBytes(hashInput, unblinded)
         }
     } finally {
-        zeroBytes(blinded.blind, blinded.input)
+        zeroSecrets(blinded.blind, blinded.input)
     }
 }
 
-internal fun pinInput(pin: CharArray): ByteArray {
+internal fun pinInput(pin: CharArray): SecretBytes {
     require(pin.all { it.code < 0x80 }) { "a PIN is ASCII digits" }
-    return ByteArray(pin.size) { pin[it].code.toByte() }
+    return ByteArray(pin.size) { pin[it].code.toByte() }.adoptAsSecret()
 }
 
 internal fun i2osp(value: Int, length: Int): ByteArray {

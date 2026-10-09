@@ -1,5 +1,8 @@
 package zekke.core.sealed
 
+import zekke.core.memory.SecretZeroedException
+import zekke.core.primitives.toHex
+import zekke.core.memory.adoptAsSecret
 import zekke.core.encoding.base64ToBytes
 import zekke.core.encoding.bytesToBase64
 import zekke.core.encoding.bytesToHex
@@ -12,7 +15,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 
 class SealedTest {
-    private val key = TestVectors.hex("sealed_blob", "key_hex")
+    private val key = TestVectors.secret("sealed_blob", "key_hex")
     private val plaintext = TestVectors.hex("sealed_blob", "plaintext_hex")
 
     @Test
@@ -27,7 +30,7 @@ class SealedTest {
     fun reproducesTheRootKeyringWrap() {
         val wrapped = sealBytesWithIv(
             TestVectors.hex("device_keys", "root_wrap", "scope_kek_hex"),
-            TestVectors.hex("vault_kek", "vault_kek_hex"),
+            TestVectors.secret("vault_kek", "vault_kek_hex"),
             TestVectors.hex("device_keys", "root_wrap", "iv_hex"),
             primitives,
         )
@@ -57,10 +60,23 @@ class SealedTest {
 
     @Test
     fun aWrongKeyDoesNotOpen() {
-        val wrongKey = key.copyOf().also { it[0] = (it[0] + 1).toByte() }
+        val wrongKey = TestVectors.hex("sealed_blob", "key_hex").also { it[0] = (it[0] + 1).toByte() }.adoptAsSecret()
         assertFailsWith<SealedBlobAuthenticationException> {
             openBlob(TestVectors.string("sealed_blob", "blob_base64"), wrongKey, primitives)
         }
+    }
+
+    @Test
+    fun aKeySealedAsASecretOpensAsOne() {
+        val dek = TestVectors.secret("sealed_blob", "plaintext_hex")
+        val opened = openSecretBlob(sealSecretBlob(dek, key, primitives), key, primitives)
+        assertEquals(TestVectors.string("sealed_blob", "plaintext_hex"), opened.toHex())
+    }
+
+    @Test
+    fun aZeroedKeyRefusesToSeal() {
+        val zeroed = TestVectors.secret("sealed_blob", "key_hex").also { it.zero() }
+        assertFailsWith<SecretZeroedException> { sealBlob(plaintext, zeroed, primitives) }
     }
 
     @Test

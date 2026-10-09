@@ -1,5 +1,6 @@
 package zekke.core.keys
 
+import zekke.core.primitives.toHex
 import zekke.core.encoding.bytesToHex
 import zekke.core.primitives.TestVectors
 import zekke.core.primitives.primitives
@@ -23,7 +24,7 @@ class MnemonicTest {
     @Test
     fun theVectorMnemonicGivesTheVectorSeed() {
         assertTrue(isValidMnemonic(vectorWords, primitives))
-        assertEquals(TestVectors.string("seed_and_user_address", "seed_hex"), bytesToHex(mnemonicToSeed(vectorWords, primitives)))
+        assertEquals(TestVectors.string("seed_and_user_address", "seed_hex"), mnemonicToSeed(vectorWords, primitives).toHex())
     }
 
     @Test

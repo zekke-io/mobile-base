@@ -50,7 +50,9 @@ Both derivations **consume the OPRF output**: it is zeroed with the Argon2id out
 The Argon2id parameters are `ARGON2ID_PARAMETERS` and are never lowered: the output would no longer
 match what the server registered.
 
-The PIN is a `CharArray` of ASCII digits; its bytes are built for each use and zeroed.
+The PIN is a `CharArray` of ASCII digits; its bytes are built for each use and zeroed. The blind,
+the PIN input, the OPRF output, the Argon2id output, the IKM and every leaf are
+[`SecretBytes`](../memory/README.md).
 
 ## Not here
 

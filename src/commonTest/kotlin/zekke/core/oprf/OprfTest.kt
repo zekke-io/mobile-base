@@ -1,5 +1,7 @@
 package zekke.core.oprf
 
+import zekke.core.primitives.toHex
+import zekke.core.memory.adoptAsSecret
 import zekke.core.encoding.base64ToBytes
 import zekke.core.encoding.bytesToBase64
 import zekke.core.encoding.bytesToHex
@@ -48,11 +50,11 @@ class OprfTest {
     fun reproducesEveryRfc9497BaseModeVector() {
         val serverKey = hex(Rfc9497Vectors.string("skSm"))
         for ((index, vector) in Rfc9497Vectors.vectors.withIndex()) {
-            val blinded = blindInputWithScalar(hex(vector.getValue("Input")), hex(vector.getValue("Blind")), primitives)
+            val blinded = blindInputWithScalar(hex(vector.getValue("Input")).adoptAsSecret(), hex(vector.getValue("Blind")).adoptAsSecret(), primitives)
             assertEquals(vector.getValue("BlindedElement"), bytesToHex(base64ToBytes(blinded.blindedElement)), "vector $index")
             val evaluated = primitives.ristretto255.scalarMult(serverKey, base64ToBytes(blinded.blindedElement))
             assertEquals(vector.getValue("EvaluationElement"), bytesToHex(evaluated), "vector $index")
-            assertEquals(vector.getValue("Output"), bytesToHex(finalizePin(blinded, bytesToBase64(evaluated), primitives)), "vector $index")
+            assertEquals(vector.getValue("Output"), finalizePin(blinded, bytesToBase64(evaluated), primitives).toHex(), "vector $index")
         }
     }
 
@@ -70,7 +72,7 @@ class OprfTest {
 
     @Test
     fun reproducesTheBlindedPinTheEvaluationAndTheOutput() {
-        val blinded = blindPinWithScalar(pin, TestVectors.hex("pin_oprf", "blind", "blind_hex"), primitives)
+        val blinded = blindPinWithScalar(pin, TestVectors.secret("pin_oprf", "blind", "blind_hex"), primitives)
         assertEquals(TestVectors.string("pin_oprf", "blind", "blinded_element"), blinded.blindedElement)
         val evaluated = primitives.ristretto255.scalarMult(
             TestVectors.hex("pin_oprf", "server", "private_key_hex"),
@@ -79,9 +81,9 @@ class OprfTest {
         assertEquals(TestVectors.string("pin_oprf", "evaluation", "evaluated_element"), bytesToBase64(evaluated))
         assertEquals(
             TestVectors.string("pin_oprf", "evaluation", "oprf_output_hex"),
-            bytesToHex(finalizePin(blinded, TestVectors.string("pin_oprf", "evaluation", "evaluated_element"), primitives)),
+            finalizePin(blinded, TestVectors.string("pin_oprf", "evaluation", "evaluated_element"), primitives).toHex(),
         )
-        assertTrue(blinded.blind.all { it == 0.toByte() } && blinded.input.all { it == 0.toByte() })
+        assertTrue(blinded.blind.isZeroed && blinded.input.isZeroed)
     }
 
     @Test

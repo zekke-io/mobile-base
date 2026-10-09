@@ -1,6 +1,8 @@
 package zekke.core.keys
 
 import zekke.core.encoding.zeroBytes
+import zekke.core.memory.SecretBytes
+import zekke.core.memory.adoptAsSecret
 import zekke.core.primitives.Primitives
 import zekke.core.primitives.platformPrimitives
 
@@ -72,7 +74,7 @@ fun generateMnemonic(wordCount: Int = 12, primitives: Primitives = platformPrimi
     }
 }
 
-fun mnemonicToSeed(words: List<CharArray>, primitives: Primitives = platformPrimitives()): ByteArray {
+fun mnemonicToSeed(words: List<CharArray>, primitives: Primitives = platformPrimitives()): SecretBytes {
     assertValidMnemonic(words, primitives)
     val password = ByteArray(words.sumOf { it.size } + words.size - 1)
     var offset = 0
@@ -81,7 +83,7 @@ fun mnemonicToSeed(words: List<CharArray>, primitives: Primitives = platformPrim
         for (character in word) password[offset++] = character.code.toByte()
     }
     try {
-        return primitives.pbkdf2HmacSha512.derive(password, BIP39_SALT.encodeToByteArray(), BIP39_ITERATIONS, SEED_LENGTH)
+        return primitives.pbkdf2HmacSha512.derive(password, BIP39_SALT.encodeToByteArray(), BIP39_ITERATIONS, SEED_LENGTH).adoptAsSecret()
     } finally {
         zeroBytes(password)
     }

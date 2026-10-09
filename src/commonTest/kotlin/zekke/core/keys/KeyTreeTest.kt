@@ -1,5 +1,6 @@
 package zekke.core.keys
 
+import zekke.core.primitives.toHex
 import zekke.core.encoding.bytesToHex
 import zekke.core.encoding.utf8ToBytes
 import zekke.core.primitives.TestVectors
@@ -10,31 +11,32 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class KeyTreeTest {
-    private val seed = TestVectors.hex("seed_and_user_address", "seed_hex")
+    private val seedBytes = TestVectors.hex("seed_and_user_address", "seed_hex")
+    private fun seed() = TestVectors.secret("seed_and_user_address", "seed_hex")
     private val words = TestVectors.string("seed_and_user_address", "mnemonic").split(' ').map { it.toCharArray() }
 
     @Test
     fun reproducesEveryValueOfTheKeyTree() {
-        val tree = deriveKeyTreeFromSeed(seed.copyOf(), primitives)
+        val tree = deriveKeyTreeFromSeed(seed(), primitives)
         assertEquals(TestVectors.string("seed_and_user_address", "user_address"), tree.userAddress)
-        assertEquals(TestVectors.string("identity_key_p256", "private_key_hex"), bytesToHex(tree.identity.privateKey))
-        assertEquals(TestVectors.string("identity_key_p256", "chain_code_hex"), bytesToHex(tree.identity.chainCode))
+        assertEquals(TestVectors.string("identity_key_p256", "private_key_hex"), tree.identity.privateKey.toHex())
+        assertEquals(TestVectors.string("identity_key_p256", "chain_code_hex"), tree.identity.chainCode.toHex())
         assertEquals(TestVectors.string("identity_key_p256", "public_key_uncompressed_hex"), bytesToHex(tree.identity.publicKeyUncompressed))
         assertEquals(TestVectors.string("identity_key_p256", "public_key_spki_base64"), tree.identity.publicKeySpkiBase64)
-        assertEquals(TestVectors.string("x25519_key", "private_key_or_seed_hex"), bytesToHex(tree.x25519.privateKey))
+        assertEquals(TestVectors.string("x25519_key", "private_key_or_seed_hex"), tree.x25519.privateKey.toHex())
         assertEquals(TestVectors.string("x25519_key", "public_key_hex"), bytesToHex(tree.x25519.publicKey))
         assertEquals(TestVectors.string("x25519_key", "public_key_base64"), tree.x25519.publicKeyBase64)
-        assertEquals(TestVectors.string("mlkem768_key", "private_key_or_seed_hex"), bytesToHex(tree.mlkem768.seed))
+        assertEquals(TestVectors.string("mlkem768_key", "private_key_or_seed_hex"), tree.mlkem768.seed.toHex())
         assertEquals(TestVectors.string("mlkem768_key", "public_key_hex"), bytesToHex(tree.mlkem768.publicKey))
         assertEquals(TestVectors.string("mlkem768_key", "public_key_base64"), tree.mlkem768.publicKeyBase64)
-        assertEquals(TestVectors.string("vault_kek", "vault_kek_hex"), bytesToHex(tree.vaultKek))
+        assertEquals(TestVectors.string("vault_kek", "vault_kek_hex"), tree.vaultKek.toHex())
     }
 
     @Test
     fun theUserAddressHashesTheRawSeedNotItsHexString() {
-        val fromHexString = bytesToHex(primitives.sha2.sha256(utf8ToBytes(bytesToHex(seed))))
+        val fromHexString = bytesToHex(primitives.sha2.sha256(utf8ToBytes(bytesToHex(seedBytes))))
         assertNotEquals(TestVectors.string("seed_and_user_address", "user_address"), fromHexString)
-        assertEquals(TestVectors.string("seed_and_user_address", "user_address"), deriveUserAddress(seed, primitives))
+        assertEquals(TestVectors.string("seed_and_user_address", "user_address"), deriveUserAddress(seed(), primitives))
     }
 
     @Test
@@ -51,9 +53,9 @@ class KeyTreeTest {
         val root = deriveRootKeysFromMnemonic(words, primitives)
         assertEquals(TestVectors.string("seed_and_user_address", "user_address"), root.userAddress)
         assertEquals(TestVectors.string("identity_key_p256", "public_key_spki_base64"), root.signing.publicKeySpkiBase64)
-        assertEquals(TestVectors.string("vault_kek", "vault_kek_hex"), bytesToHex(root.wrapKey))
+        assertEquals(TestVectors.string("vault_kek", "vault_kek_hex"), root.wrapKey.toHex())
         zeroRootKeys(root)
-        assertTrue(root.signing.privateKey.all { it == 0.toByte() } && root.wrapKey.all { it == 0.toByte() })
+        assertTrue(root.signing.privateKey.isZeroed && root.wrapKey.isZeroed)
     }
 
     @Test
@@ -64,6 +66,6 @@ class KeyTreeTest {
             tree.seed, tree.identity.privateKey, tree.identity.chainCode, tree.x25519.privateKey,
             tree.mlkem768.seed, tree.mlkem768.secretKey, tree.vaultKek,
         )
-        assertTrue(buffers.all { buffer -> buffer.all { it == 0.toByte() } })
+        assertTrue(buffers.all { it.isZeroed })
     }
 }
